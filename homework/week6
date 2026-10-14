@@ -1,0 +1,246 @@
+https://chatgpt.com/share/6acef304-1664-83ec-8c2d-5c8e72a3fb96 對話連結
+lambda-calculus-interpreter
+
+Python Lambda Calculus interpreter with step-by-step beta reduction.
+
+
+#!/usr/bin/env python3
+from dataclasses import dataclass
+
+@dataclass(frozen=True)
+class Var:
+    name: str
+
+@dataclass(frozen=True)
+class Lam:
+    param: str
+    body: object
+
+@dataclass(frozen=True)
+class App:
+    fn: object
+    arg: object
+
+def tokenize(s):
+    s = s.replace("λ", "\\")
+    tokens = []
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if c.isspace():
+            i += 1
+        elif c in "\\().":
+            tokens.append(c)
+            i += 1
+        elif c.isalnum() or c == "_":
+            j = i
+            while j < len(s) and (s[j].isalnum() or s[j] in "_'"):
+                j += 1
+            word = s[i:j]
+            tokens.append("\\" if word == "lambda" else word)
+            i = j
+        else:
+            raise ValueError(f"無法辨識的字元：{c}")
+    return tokens
+
+class Parser:
+    def __init__(self, tokens):
+        self.t = tokens
+        self.i = 0
+
+    def peek(self):
+        return self.t[self.i] if self.i < len(self.t) else None
+
+    def take(self, expected=None):
+        x = self.peek()
+        if x is None or (expected and x != expected):
+            raise ValueError(f"語法錯誤，預期 {expected or '輸入'}")
+        self.i += 1
+        return x
+
+    def parse(self):
+        e = self.expr()
+        if self.peek() is not None:
+            raise ValueError("多餘的輸入")
+        return e
+
+    def expr(self):
+        if self.peek() == "\\":
+            self.take("\\")
+            params = []
+            while self.peek() != ".":
+                p = self.take()
+                if p in ("\\", "(", ")"):
+                    raise ValueError("參數名稱錯誤")
+                params.append(p)
+            self.take(".")
+            body = self.expr()
+            for p in reversed(params):
+                body = Lam(p, body)
+            return body
+        e = self.atom()
+        while self.peek() not in (None, ")", "."):
+            if self.peek() == "\\":
+                a = self.expr()
+            else:
+                a = self.atom()
+            e = App(e, a)
+        return e
+
+    def atom(self):
+        x = self.peek()
+        if x == "(":
+            self.take("(")
+            e = self.expr()
+            self.take(")")
+            return e
+        if x is None or x in ("\\", ")", "."):
+            raise ValueError("缺少表達式")
+        self.take()
+        return Var(x)
+
+def show(e, context=0):
+    if isinstance(e, Var):
+        return e.name
+    if isinstance(e, Lam):
+        s = "\\" + e.param + ". " + show(e.body)
+        return "(" + s + ")" if context else s
+    s = show(e.fn, 1) + " " + show(e.arg, 2)
+    return "(" + s + ")" if context > 1 else s
+
+def free_vars(e):
+    if isinstance(e, Var):
+        return {e.name}
+    if isinstance(e, Lam):
+        return free_vars(e.body) - {e.param}
+    return free_vars(e.fn) | free_vars(e.arg)
+
+def names(e):
+    if isinstance(e, Var):
+        return {e.name}
+    if isinstance(e, Lam):
+        return {e.param} | names(e.body)
+    return names(e.fn) | names(e.arg)
+
+def fresh(avoid):
+    i = 1
+    while f"v{i}" in avoid:
+        i += 1
+    return f"v{i}"
+
+def subst(e, x, value):
+    if isinstance(e, Var):
+        return value if e.name == x else e
+    if isinstance(e, App):
+        return App(subst(e.fn, x, value),
+                   subst(e.arg, x, value))
+    if isinstance(e, Lam):
+        if e.param == x:
+            return e
+        if e.param in free_vars(value) and x in free_vars(e.body):
+            new = fresh(names(e.body) | names(value) | {x})
+            body = subst(e.body, e.param, Var(new))
+            return Lam(new, subst(body, x, value))
+        return Lam(e.param, subst(e.body, x, value))
+
+def step(e):
+    # Normal-order beta reduction
+    if isinstance(e, App):
+        if isinstance(e.fn, Lam):
+            return subst(e.fn.body, e.fn.param, e.arg)
+        left = step(e.fn)
+        if left is not None:
+            return App(left, e.arg)
+        right = step(e.arg)
+        if right is not None:
+            return App(e.fn, right)
+    elif isinstance(e, Lam):
+        body = step(e.body)
+        if body is not None:
+            return Lam(e.param, body)
+    return None
+
+def interpret(source, limit=500):
+    e = Parser(tokenize(source)).parse()
+    print("步驟 0：", show(e))
+    for i in range(1, limit + 1):
+        new = step(e)
+        if new is None:
+            print("完成，正規形：", show(e))
+            return
+        e = new
+        print(f"步驟 {i}：", show(e))
+    print("已達步數上限，可能無限計算。")
+
+if __name__ == "__main__":
+    print("Lambda Calculus 解譯器")
+    print(r"輸入 \x. x，例如 (\x. x) y；輸入 exit 離開")
+    while True:
+        try:
+            s = input("λ> ").strip()
+            if s.lower() in ("exit", "quit"):
+                break
+            interpret(s)
+        except (ValueError, RecursionError) as err:
+            print("錯誤：", err)
+
+
+ 
+ Lambda Calculus 解譯器：實作過程文件
+1. 功能
+這份作業採用「有名稱（named）」的 Lambda Calculus 表示法，以 Python 3 實作解譯器。輸入表達式後，程式會逐步顯示每次 β-reduction，直到沒有可約簡的表達式，或達到步數上限。
+支援：
+變數，例如 `x`
+函數抽象，例如 `\x. x` 或 `lambda x. x`
+函數應用，例如 `f x`
+括號，例如 `(\x. x) y`
+多個參數的簡寫，例如 `\x y. x`（會轉成 `\x. \y. x`）
+捕獲避免代換（capture-avoiding substitution）
+左最外層／normal-order 的一步一步 β 約簡
+2. 使用方法
+需要 Python 3。將 `lambda_interpreter.py` 下載到電腦後，在終端機或命令提示字元執行：
+```bash
+python lambda_interpreter.py
+```
+在 `λ>` 提示符輸入表達式。輸入 `exit` 離開。
+3. 範例
+輸入：
+```text
+(\x. x) y
+```
+預期主要輸出：
+```text
+輸入： (\x. x) y
+步驟 0： (\x. x) y
+步驟 1： y
+完成：正規形為 y
+```
+另一個例子：
+```text
+(\x. \y. x) a b
+```
+會依序約簡成 `(\y. a) b`，再約簡成 `a`。
+4. 設計流程
+詞法分析（tokenize）：把輸入字串切成變數、反斜線、點及括號等 token。
+語法分析（Parser）：依文法建立 AST（抽象語法樹），節點分為 `Var`、`Lam`、`App`。
+格式化輸出（pretty）：將 AST 轉回容易閱讀的 Lambda 表達式。
+自由變數分析（free_vars）：找出沒有被 lambda 綁定的變數。
+代換（substitute）：實作 β-reduction 的代換，必要時先改名以避免變數捕獲。
+單步約簡（one_step）：採左最外層策略，每次只執行一次 β 約簡並回傳說明。
+解譯迴圈（interpret）：顯示步驟 0、每次約簡後的結果，並在正規形或步數上限時停止。
+5. 約簡規則
+β 約簡規則：
+`(\x. M) N  →  M[x := N]`
+意思是將函數抽象 `\x. M` 套用到引數 `N`，把函數主體 `M` 中由該抽象綁定的 `x` 以 `N` 代換。代換時不能讓原本的自由變數意外被內層 lambda 綁定，因此程式在必要時會先做 α-renaming（改名）。
+6. 測試建議
+請至少測試：
+`(\x. x) y` → `y`
+`(\x. \y. x) a b` → `a`
+`(\x. x x) (\z. z)` → `\z. z`
+`(\x. \y. x y) y` → 會先改名避免捕獲，再繼續約簡
+7. 限制
+這是有名稱版本，不是 de Bruijn index 的無名稱版本。
+採 normal-order 約簡；若輸入是會無限展開的項（例如 `(\x. x x) (\x. x x)`），程式會在 500 步後停止。
+輸入語法是精簡教學版，函數抽象使用 `\x. M` 或 `lambda x. M`，抽象與應用混用時建議加括號。
+8. 繳交說明
+建議繳交 `lambda_interpreter.py`，並附上本文件 `README_作業過程.md`。如果老師要求分享網址，可將這兩個檔案上傳到 GitHub repository 或 Replit 專案，再分享該專案網址；上傳前請先實際執行範例並確認輸出。
